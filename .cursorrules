@@ -1,1 +1,233 @@
-stack: RedwoodJS
+# Overview
+
+This is a RedwoodJS (aka Redwood) project.
+
+Redwood is a React framework with lots of pre-installed packages and configuration that makes it easy to build full-stack web applications.
+
+It relies on the following technologies:
+
+- [RedwoodJS](https://redwoodjs.com/docs)
+- [React](https://react.dev/)
+- [Prisma](https://www.prisma.io/)
+- [SQLite](https://www.sqlite.org/index.html)
+- [GraphQL Yoga](https://the-guild.dev/graphql/yoga-server)
+- [Vite](https://vitejs.dev/)
+- [Storybook](https://storybook.js.org/)
+- [TailwindCSS](https://tailwindcss.com/)
+- [Typescript](https://www.typescriptlang.org/)
+
+## Project Structure
+
+A Redwood app is actually two apps: a frontend (that's the React part) and a backend, which is your server and talks to a database and other third party systems. Your app is technically a monorepo with two top-level directories: web containing the frontend code and api containing the backend.
+
+- api # Backend api side
+  - db # Database schema and migrations (Prisma)
+    - schema.prisma
+    - migrations
+  - src # Source code for the api side
+    - directives # Custom GraphQL directives
+    - functions # Custom serverless functions
+      - graphql # GraphQL yoga handler that imports the SDL types and services in a merged schema
+    - graphql # Custom GraphQL sdl types
+      - model.sdl.ts (for example to define custom GraphQL types or generate types from the Prisma schema)
+        - all sdl.ts files are merged into a single schema at runtime
+        - will begin with "export const schema = gql`...`"
+        - when including queries, mutations or subscriptions, make sure to add the `@skipAuth` directive if the client doesn't need to be authenticated to access the data
+    - lib # Library code for the api side
+      - logger # Pino based logger
+      - db # Database client (Prisma)
+      - other libraries such as mailer, storage, etc.
+    - services # Custom services (these are GraphQL resolvers)
+  - types # Shared types between frontend and backend
+- web # Frontend web side
+  - src
+    - public # Static assets
+    - components # Shared React components (including cells)
+    - layouts # Shared React layouts
+    - pages # React pages
+
+Note that api sdl, service and often model relies on the naming convention of the file.
+For example, a service file is named `cars.ts` and so the matching GraphQL mutation will be named `cars.sdl.ts` and the graphql query will be named `cars` and the Prisma model could be named `car` in this case in `schema.prisma`. Fields in the model would be kept in sync with the GraphQL type.
+
+Note that not all sdl types will has Prisma models. And not all Prisma models will have GraphQL types.
+
+# API Side
+
+## Logging
+
+Logging is done using the `logger` library which is a found in `src/lib/logger.ts`.
+
+To use logger, import it like this: `import { logger } from 'src/lib/logger'`
+
+To log something, call `logger.info({ some: 'data }, 'some message')` (object, then string message).
+
+When making log statements, include any data that might help with debugging as the first argument and in the strintg message include file name or function name as appropriate to help identify where the log statement is coming from.
+
+## Services
+
+Services are the functions that are called from the GraphQL resolvers. They are found in `src/services` and are named like `model.ts`.
+
+## Authentication
+
+Authentication is done using graphql directives and the `skipAuth` directive can be added to queries and mutations that should be accessible to unauthenticated users.
+
+The `requireAuth` directive can be added to GraphQL types, fields, and queries/mutations that should only be accessible to authenticated users.
+
+The auth and currentUser are made available to all pages and cells via the `useAuth` hook and `useCurrentUser` hook respectively.
+
+Auth lib is found in `src/lib/auth.ts` for convenience to get the current user and check if the user is authenticated.
+
+# Wed Side
+
+### Router
+
+When you open your web app in a browser, React does its thing initializing your app and monitoring the history for changes so that new content can be shown. Redwood features a custom, declarative Router that lets you specify URLs and the requisite pages (just a React component) will be shown. A simple routes file may look something like:
+
+```tsx filename=web/src/Routes.tsx
+
+import { Route, Router, Set, PrivateSet } from '@redwoodjs/router'
+import ApplicationLayout from 'src/layouts/ApplicationLayout'
+import { useAuth } from './auth'
+
+const Routes = () => {
+  return (
+    <Router useAuth={useAuth}>
+      <Set wrap={ApplicationLayout}>
+        <Route path="/login" page={LoginPage} name="login" />
+        <Route path="/signup" page={SignupPage} name="signup" />
+        <PrivateSet unauthenticated="login">
+          <Route path="/dashboard" page={DashboardPage} name="dashboard" />
+          <Route path="/products/{sku}" page={ProductsPage} name="products" />
+        </PrivateSet>
+      </Set>
+
+      <Route path="/" page={HomePage} name="home" />
+      <Route notfound page={NotFoundPage} />
+    </Router>
+  )
+}
+```
+
+All routes are defined in the `web/src/Routes.tsx` file.
+
+Links to routes are generated using the `Link` component from the `@redwoodjs/router` package as is the `navigate()` function.
+
+### GraphQL
+
+Redwood uses GraphQL as the glue between the front- and backends: whenever you want data from the server/database, you're going to retrieve it via GraphQL. Now, we could have just given you raw access to some GraphQL library and let you make those calls yourself. We use Apollo Client on the frontend and Apollo provides hooks like useQuery() and useMutation() to retrieve and set data, respectively. But Redwood has a much deeper integration.
+
+All GraphQL queries, mutations, and subscriptions are defined in the `api/src/graphql` directory.
+
+To make a query, mutation, or subscription, you'll need to create a cell and use `useQuery()`, `useMutation()`, or `useSubscription()` hooks, respectively from the `@redwoodjs/web` package.
+
+### Cells
+
+A cell is still just a React component (also called a single file component), it just happens to follow a couple of conventions that make it work as described above:
+
+The name of the file ends in "Cell"
+
+The file exports several named components, at the very least one named QUERY and another named Success
+
+The file can optionally export several other components, like Loading, Failure and Empty. You can probably guess what those are for!
+So, any time React is about to render a cell, the following lifecycle occurs:
+
+1. The Loading component is displayed
+2. A useQuery() hook is fired, using the exported QUERY
+3. Assuming the data returns successfully, the Success component is rendered with one of the props being the data returned from useQuery()
+4. As an alternative to step 3, if something went wrong then Failure is rendered. If the query returned null or an empty array, the Empty component is rendered. If you don't export either of those then Success will be rendered and it would be up to you to show the error or empty state through conditional code.
+
+export const QUERY = gql`
+  query GetTestimonials {
+    testimonials {
+      id
+      author
+      quote
+    }
+  }
+`
+
+```tsx filename=web/src/components/TestimonialsCell.tsx
+export const Loading = () => <div>Loading...</div>
+
+export const Failure = ({ error }) => <div>An error occured! {error.message}</div>
+
+export const Success = ({ testimonials }) => {
+  return (
+    <ul>
+      {testimonials.map((test) => {
+        <li key={test.id}>{test.quote} — {test.author}</li>
+      })}
+    </ul>
+  )
+}
+```
+
+### Forms
+
+Use [RedwoodJS Form components](https://redwoodjs.com/docs/forms) to handle form state and submission.
+
+Forms will submit via a GraphQL mutation.
+
+### Toast
+
+Use [RedwoodJS Toast](https://docs.redwoodjs.com/docs/toast-notifications) to display notifications to the user.
+
+See: `import { Toaster } from '@redwoodjs/web/toast'`
+
+Can be in any layout or page.
+
+```tsx filename=web/src/layouts/MainLayout/MainLayout.tsx
+import { Toaster } from '@redwoodjs/web/toast'
+
+const MainLayout = ({ children }) => {
+  return (
+    <>
+      <Toaster />
+      <main>{children}</main>
+    </>
+  )
+}
+
+export default MainLayout
+```
+
+Use `toast.success()`, `toast.error()`, etc. in your mutations or other code to display notifications to the user.
+
+```
+import { toast } from '@redwoodjs/web/toast'
+
+// ...
+
+const PostForm = () => {
+  const [create, { loading, error }] = useMutation(CREATE_POST_MUTATION)
+
+  const onSubmit = async (data) => {
+    try {
+      await create({ variables: { input: data }})
+      toast('Post created')
+    }
+    catch (e) {
+      toast('Error creating post')
+    }
+  }
+
+  return (
+    // <Form onSubmit={onSubmit}> ... </Form>
+  )
+}
+```
+
+## Code Style
+
+- no semicolons to end statements
+- 2 spaces for indentation
+- camelCase for variable names
+- prefer `const` over `let`
+- prefer arrow functions over `function`
+
+## Additional RedwoodJS References
+
+- [What is RedwoodJS?](https://docs.redwoodjs.com/docs/tutorial/chapter0/what-is-redwood)
+- [Application Configuration](https://docs.redwoodjs.com/docs/app-configuration-redwood-toml)
+- [Cells and Data Fetching](https://docs.redwoodjs.com/docs/cells/)
+- [GraphQL](https://docs.redwoodjs.com/docs/graphql)
