@@ -77,7 +77,7 @@ The auth and currentUser are made available to all pages and cells via the `useA
 
 Auth lib is found in `src/lib/auth.ts` for convenience to get the current user and check if the user is authenticated.
 
-# Wed Side
+# Web Side
 
 ### Router
 
